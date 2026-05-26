@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# un-ignore .claude so the plugin skill files are tracked
+!.claude/
+!.claude/**

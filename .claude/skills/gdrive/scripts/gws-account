@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""gws-account: manage multiple gws accounts via per-account config dirs.
+
+Subcommands:
+    add <name>      Create ~/.config/gws/accounts/<name>/ and run `gws auth login`.
+    list            Show all configured accounts, their email, and which is default.
+    use <name>      Set the default account (writes ~/.config/gws/active-account).
+    show            Print the current default account name.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+GWS_HOME = Path.home() / ".config" / "gws"
+ACCOUNTS_DIR = GWS_HOME / "accounts"
+ACTIVE_FILE = GWS_HOME / "active-account"
+SHARED_CLIENT_SECRET = GWS_HOME / "client_secret.json"
+
+
+def _account_dir(name: str) -> Path:
+    return ACCOUNTS_DIR / name
+
+
+def _gws_env(name: str) -> dict:
+    env = os.environ.copy()
+    env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = str(_account_dir(name))
+    return env
+
+
+def _read_active() -> str | None:
+    if not ACTIVE_FILE.exists():
+        return None
+    return ACTIVE_FILE.read_text().strip() or None
+
+
+def _email_for(name: str) -> str:
+    """Best-effort: scrape `gws auth status` for the logged-in email."""
+    try:
+        result = subprocess.run(
+            ["gws", "auth", "status"],
+            env=_gws_env(name),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return "(status unavailable)"
+    text = (result.stdout or "") + (result.stderr or "")
+    for line in text.splitlines():
+        for token in line.replace(",", " ").split():
+            token = token.strip("<>()'\".,")
+            if "@" in token and "." in token.split("@", 1)[1]:
+                return token
+    return "(not logged in)" if result.returncode != 0 else "(unknown)"
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    name = args.name
+    if not all(c.isalnum() or c in "-_" for c in name):
+        print(f"gws-account: name must be alphanumeric/dash/underscore (got {name!r})", file=sys.stderr)
+        return 3
+    d = _account_dir(name)
+    if d.exists():
+        print(f"gws-account: account '{name}' already exists at {d}", file=sys.stderr)
+        return 4
+    d.mkdir(parents=True, exist_ok=True)
+    print(f"Created {d}")
+
+    local_secret = d / "client_secret.json"
+    if SHARED_CLIENT_SECRET.exists():
+        shutil.copy(SHARED_CLIENT_SECRET, local_secret)
+        print(f"Copied shared client_secret.json -> {local_secret}")
+    else:
+        print(
+            f"No shared client_secret.json at {SHARED_CLIENT_SECRET}.\n"
+            f"Place one at {local_secret} before logging in, or `gws auth setup` if you have gcloud."
+        )
+
+    print(f"\nRunning `gws auth login` for account '{name}'. Browser will open.")
+    try:
+        input("Press Enter to continue (Ctrl-C to abort)... ")
+    except KeyboardInterrupt:
+        print("\nAborted. Account dir kept at " + str(d) + "; remove manually if not wanted.")
+        return 130
+
+    rc = subprocess.call(["gws", "auth", "login"], env=_gws_env(name))
+    if rc != 0:
+        print(f"\ngws auth login exited {rc}; account dir at {d} kept for debug.", file=sys.stderr)
+        return rc
+
+    print(f"\nAccount '{name}' ready. Verify with: gws-as {name} drive files list --params '{{\"pageSize\":3}}'")
+    if not ACTIVE_FILE.exists():
+        ACTIVE_FILE.write_text(name + "\n")
+        print(f"(Set '{name}' as default because no default was set.)")
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    if not ACCOUNTS_DIR.exists():
+        print("(no accounts configured yet -- run `gws-account add <name>`)")
+        return 0
+    accounts = sorted(p.name for p in ACCOUNTS_DIR.iterdir() if p.is_dir())
+    if not accounts:
+        print("(no accounts configured yet -- run `gws-account add <name>`)")
+        return 0
+    active = _read_active()
+    width = max(len(a) for a in accounts + ["NAME"])
+    print(f"{'NAME':<{width}}  {'DEFAULT':<8}  EMAIL")
+    for name in accounts:
+        mark = "*" if name == active else ""
+        email = _email_for(name)
+        print(f"{name:<{width}}  {mark:<8}  {email}")
+    return 0
+
+
+def cmd_use(args: argparse.Namespace) -> int:
+    name = args.name
+    if not _account_dir(name).exists():
+        print(f"gws-account: no account '{name}'. Add with `gws-account add {name}`.", file=sys.stderr)
+        return 3
+    GWS_HOME.mkdir(parents=True, exist_ok=True)
+    ACTIVE_FILE.write_text(name + "\n")
+    print(f"Default account set to '{name}'.")
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    name = _read_active()
+    if not name:
+        print("(no default account set -- use `gws-account use <name>`)")
+        return 1
+    print(name)
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="gws-account", description="Manage multiple gws accounts.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_add = sub.add_parser("add", help="Create a new account and run gws auth login")
+    p_add.add_argument("name")
+    p_add.set_defaults(func=cmd_add)
+
+    p_list = sub.add_parser("list", help="List configured accounts")
+    p_list.set_defaults(func=cmd_list)
+
+    p_use = sub.add_parser("use", help="Set the default account")
+    p_use.add_argument("name")
+    p_use.set_defaults(func=cmd_use)
+
+    p_show = sub.add_parser("show", help="Print the current default account")
+    p_show.set_defaults(func=cmd_show)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

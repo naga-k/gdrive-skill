@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# gws-as <account> <gws-args...>
+#
+# Run any `gws ...` command under a specific account's isolated config dir.
+# Accounts live at ~/.config/gws/accounts/<name>/. Create one with `gws-account add`.
+#
+# Examples:
+#   gws-as work drive files list --params '{"pageSize": 5}'
+#   gws-as personal sheets spreadsheets get --params '{"spreadsheetId": "..."}'
+
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+    cat >&2 <<'USAGE'
+Usage: gws-as <account-name> <gws-args...>
+
+Examples:
+    gws-as work drive files list --params '{"pageSize": 5}'
+    gws-as personal sheets spreadsheets get --params '{"spreadsheetId": "..."}'
+
+Accounts must be registered via `gws-account add <name>` first.
+List accounts with `gws-account list`.
+USAGE
+    exit 2
+fi
+
+account="$1"; shift
+config_dir="$HOME/.config/gws/accounts/${account}"
+
+if [[ ! -d "$config_dir" ]]; then
+    echo "gws-as: account '${account}' not found at ${config_dir}" >&2
+    echo "Add it with: gws-account add ${account}" >&2
+    exit 3
+fi
+
+exec env GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$config_dir" gws "$@"

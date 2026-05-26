@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""gws-sheet: read named Google Sheets through the multi-account gws layer.
+
+Subcommands:
+    register <name> <url-or-id>   Probe configured accounts, confirm, write registry entry.
+    list                          Show every registered tracker.
+    info <name>                   Show name, sheet_id, account, list of tabs.
+    read <name> [range]           Read a range (default: A:Z on first tab).
+
+Registry: ~/.config/gws/registry.toml
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+GWS_HOME = Path.home() / ".config" / "gws"
+REGISTRY = GWS_HOME / "registry.toml"
+ACCOUNTS_DIR = GWS_HOME / "accounts"
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+GWS_AS = SCRIPT_DIR / "gws-as"
+
+
+def _accounts() -> list[str]:
+    if not ACCOUNTS_DIR.exists():
+        return []
+    return sorted(p.name for p in ACCOUNTS_DIR.iterdir() if p.is_dir())
+
+
+def _registry_read() -> dict:
+    if not REGISTRY.exists():
+        return {"trackers": {}}
+    with REGISTRY.open("rb") as f:
+        data = tomllib.load(f)
+    data.setdefault("trackers", {})
+    return data
+
+
+def _registry_write(data: dict) -> None:
+    """Write TOML by hand. stdlib's tomllib reads only; manual emit is fine since
+    the schema is small and we control all writes."""
+    GWS_HOME.mkdir(parents=True, exist_ok=True)
+    out = ["# Registry for gws-sheet. Managed by gws-sheet register/list."]
+    for name in sorted(data.get("trackers", {}).keys()):
+        entry = data["trackers"][name]
+        out.append("")
+        out.append(f"[trackers.{name}]")
+        for k in ("sheet_id", "account", "kind"):
+            if k in entry:
+                v = str(entry[k]).replace("\\", "\\\\").replace('"', '\\"')
+                out.append(f'{k:<8} = "{v}"')
+    REGISTRY.write_text("\n".join(out) + "\n")
+
+
+def _gws_as(account: str, *args: str, capture: bool = True) -> subprocess.CompletedProcess:
+    cmd = [str(GWS_AS), account, *args]
+    if capture:
+        return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd)
+
+
+SHEET_URL_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
+DRIVE_URL_RE = re.compile(r"/d/([a-zA-Z0-9_-]+)")
+
+
+def _extract_id(s: str) -> str:
+    m = SHEET_URL_RE.search(s) or DRIVE_URL_RE.search(s)
+    if m:
+        return m.group(1)
+    return s.strip()
+
+
+def _probe_accounts(file_id: str) -> list[str]:
+    """Return account names whose configured creds can files.get this resource."""
+    ok = []
+    for acct in _accounts():
+        cp = _gws_as(
+            acct,
+            "drive", "files", "get",
+            "--params", json.dumps({"fileId": file_id, "fields": "id,name,mimeType"}),
+        )
+        if cp.returncode == 0:
+            ok.append(acct)
+    return ok
+
+
+def cmd_register(args: argparse.Namespace) -> int:
+    name = args.name
+    file_id = _extract_id(args.url_or_id)
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", file_id):
+        print(f"gws-sheet: cannot extract a valid file ID from {args.url_or_id!r}", file=sys.stderr)
+        return 3
+    accounts = _accounts()
+    if not accounts:
+        print("gws-sheet: no accounts configured. Add one with `gws-account add <name>`.", file=sys.stderr)
+        return 4
+    data = _registry_read()
+    if name in data["trackers"] and not args.force:
+        existing = data["trackers"][name]
+        print(
+            f"gws-sheet: tracker '{name}' already registered "
+            f"(sheet_id={existing.get('sheet_id')}, account={existing.get('account')}). "
+            f"Use --force to overwrite.",
+            file=sys.stderr,
+        )
+        return 5
+
+    print(f"Probing {len(accounts)} account(s) for file_id={file_id}...")
+    ok = _probe_accounts(file_id)
+    if not ok:
+        print(
+            "gws-sheet: no configured account can access that file.\n"
+            "Check the URL, or share the file with one of: " + ", ".join(accounts),
+            file=sys.stderr,
+        )
+        return 6
+    if len(ok) > 1:
+        print(f"Multiple accounts can access this file: {', '.join(ok)}")
+        chosen = input(f"Which one should '{name}' use? [{ok[0]}]: ").strip() or ok[0]
+        if chosen not in ok:
+            print(f"gws-sheet: '{chosen}' not among accounts with access.", file=sys.stderr)
+            return 7
+    else:
+        chosen = ok[0]
+        confirm = input(f"Register '{name}' on account '{chosen}'? [Y/n]: ").strip().lower()
+        if confirm and confirm not in ("y", "yes"):
+            print("Aborted.")
+            return 1
+
+    data["trackers"][name] = {
+        "sheet_id": file_id,
+        "account": chosen,
+        "kind": args.kind,
+    }
+    _registry_write(data)
+    print(f"Registered '{name}' -> sheet_id={file_id}, account={chosen}.")
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    data = _registry_read()
+    trackers = data["trackers"]
+    if not trackers:
+        print("(no trackers registered -- `gws-sheet register <name> <url>`)")
+        return 0
+    width_name = max(len(n) for n in list(trackers.keys()) + ["NAME"])
+    width_acct = max(len(t.get("account", "")) for t in trackers.values()) or 7
+    width_acct = max(width_acct, len("ACCOUNT"))
+    print(f"{'NAME':<{width_name}}  {'ACCOUNT':<{width_acct}}  SHEET_ID")
+    for name in sorted(trackers):
+        t = trackers[name]
+        print(f"{name:<{width_name}}  {t.get('account',''):<{width_acct}}  {t.get('sheet_id','')}")
+    return 0
+
+
+def _resolve(name: str) -> dict:
+    data = _registry_read()
+    t = data["trackers"].get(name)
+    if not t:
+        print(
+            f"gws-sheet: no tracker '{name}'. "
+            f"Register with `gws-sheet register {name} <url>` "
+            f"or see `gws-sheet list`.",
+            file=sys.stderr,
+        )
+        sys.exit(8)
+    return t
+
+
+def cmd_info(args: argparse.Namespace) -> int:
+    t = _resolve(args.name)
+    print(f"name:     {args.name}")
+    print(f"sheet_id: {t['sheet_id']}")
+    print(f"account:  {t['account']}")
+    print(f"kind:     {t.get('kind', 'sheet')}")
+    cp = _gws_as(
+        t["account"], "sheets", "spreadsheets", "get",
+        "--params", json.dumps({
+            "spreadsheetId": t["sheet_id"],
+            "fields": "properties.title,sheets.properties(title,sheetId,gridProperties.rowCount,gridProperties.columnCount)",
+        }),
+    )
+    if cp.returncode != 0:
+        sys.stderr.write(cp.stderr)
+        return cp.returncode
+    try:
+        meta = json.loads(cp.stdout)
+    except json.JSONDecodeError:
+        print(cp.stdout)
+        return 0
+    print(f"title:    {meta.get('properties', {}).get('title','')}")
+    print("tabs:")
+    for s in meta.get("sheets", []):
+        p = s.get("properties", {})
+        gp = p.get("gridProperties", {})
+        print(f"  - {p.get('title','?')}  ({gp.get('rowCount','?')} rows x {gp.get('columnCount','?')} cols)")
+    return 0
+
+
+def cmd_read(args: argparse.Namespace) -> int:
+    t = _resolve(args.name)
+    rng = args.range or "A:Z"
+    cp = _gws_as(
+        t["account"], "sheets", "spreadsheets", "values", "get",
+        "--params", json.dumps({"spreadsheetId": t["sheet_id"], "range": rng}),
+    )
+    if cp.returncode != 0:
+        sys.stderr.write(cp.stderr)
+        return cp.returncode
+    if args.format == "table":
+        try:
+            obj = json.loads(cp.stdout)
+            for row in obj.get("values", []):
+                print("\t".join(str(c) for c in row))
+            return 0
+        except json.JSONDecodeError:
+            pass
+    sys.stdout.write(cp.stdout)
+    if not cp.stdout.endswith("\n"):
+        sys.stdout.write("\n")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="gws-sheet",
+        description="Named Google Sheets operations via the gws multi-account layer.",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_reg = sub.add_parser("register", help="Probe accounts and register a sheet by name")
+    p_reg.add_argument("name")
+    p_reg.add_argument("url_or_id")
+    p_reg.add_argument("--kind", default="sheet", choices=["sheet"])
+    p_reg.add_argument("--force", action="store_true")
+    p_reg.set_defaults(func=cmd_register)
+
+    p_list = sub.add_parser("list", help="List all registered trackers")
+    p_list.set_defaults(func=cmd_list)
+
+    p_info = sub.add_parser("info", help="Show info about a tracker (incl. tabs)")
+    p_info.add_argument("name")
+    p_info.set_defaults(func=cmd_info)
+
+    p_read = sub.add_parser("read", help="Read a range from a tracker")
+    p_read.add_argument("name")
+    p_read.add_argument("range", nargs="?", default=None, help='e.g. "Sheet1!A1:F50" or "A:Z"')
+    p_read.add_argument("--format", choices=["json", "table"], default="json")
+    p_read.set_defaults(func=cmd_read)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

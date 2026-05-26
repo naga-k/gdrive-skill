@@ -1,9 +1,8 @@
 {
   "name": "gdrive-skill",
-  "version": "1.0.0",
-  "description": "Google Drive operations for Claude Code via the gws CLI — multi-account management, named Sheets tracker registry, and Drive video download with transcript extraction.",
-  "author": "naga-k",
-  "license": "MIT",
-  "repository": "https://github.com/naga-k/gdrive-skill",
-  "keywords": ["google-drive", "google-sheets", "gws", "multi-account", "transcript", "download", "workflow"]
+  "description": "Google Drive + Sheets for Claude Code via the gws CLI — multi-account auth isolation, named Sheets tracker registry, and Drive video download with transcript extraction.",
+  "author": {
+    "name": "naga-k",
+    "email": "naga-k@users.noreply.github.com"
+  }
 }

@@ -14,8 +14,13 @@ the common "download this shared video and its transcript" workflow.
 
 ## Usage
 
+The script lives at `scripts/gdrive_download.py` relative to the **gdrive skill root**
+(one level up from this sub-skill). When this skill loads, the base directory header
+shows the install path — use that to construct the full path, or add the `scripts/`
+directory to your `$PATH` for direct terminal invocation.
+
 ```bash
-python3 ~/.claude/skills/gdrive/scripts/gdrive_download.py <drive_url_or_id> \
+python3 <gdrive-skill-root>/scripts/gdrive_download.py <drive_url_or_id> \
     [--out-dir PATH]                          # default: media/downloads/<slug>/
     [--transcript auto|sibling|generate|skip] # default: auto
     [--account PATH]                          # alternate credentials JSON
@@ -71,7 +76,7 @@ Drive folder → skip (does NOT generate locally unless `generate` is explicit).
 ## Example — download today's meeting video
 
 ```bash
-python3 ~/.claude/skills/gdrive/scripts/gdrive_download.py \
+python3 <gdrive-skill-root>/scripts/gdrive_download.py \
     "https://drive.google.com/file/d/<YOUR_FILE_ID>/view" \
     --out-dir media/downloads/team_review/ \
     --transcript auto

@@ -37,8 +37,6 @@ in "Multi-account (low-level)" below.
 - `scripts/gws-sheet`: register, list, info, read named Sheets trackers (read-only today).
 - `scripts/gdrive_download.py`: used by the `download` sub-skill.
 
-Design context: [`docs/2026-05-20-multi-account-design.md`](docs/2026-05-20-multi-account-design.md).
-
 ## Sub-skills
 
 - [`download`](download/SKILL.md) — download a Drive video and obtain its

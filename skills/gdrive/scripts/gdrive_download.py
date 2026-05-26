@@ -6,7 +6,7 @@ Usage:
                                    [--transcript auto|sibling|generate|skip]
                                    [--account PATH]
 
-See ~/.claude/skills/gdrive/download/SKILL.md for the full flow.
+See skills/gdrive/download/SKILL.md in the plugin repo for the full flow.
 """
 
 from __future__ import annotations

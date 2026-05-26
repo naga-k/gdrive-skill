@@ -2,6 +2,17 @@ __pycache__/
 *.pyc
 .DS_Store
 
+# credential patterns — gws stores these in ~/.config/gws/, not here,
+# but block them in case one is accidentally dropped into the skill dir
+client_secret*.json
+credentials*.json
+credentials.enc
+token_cache.json
+*.enc
+.env
+.env.*
+registry.toml
+
 # un-ignore .claude so the plugin skill files are tracked
 !.claude/
 !.claude/**

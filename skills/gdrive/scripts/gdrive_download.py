@@ -4,7 +4,7 @@
 Usage:
     gdrive_download.py <url_or_id> [--out-dir PATH]
                                    [--transcript auto|sibling|generate|skip]
-                                   [--account PATH]
+                                   [--account NAME]
 
 See skills/gdrive/download/SKILL.md in the plugin repo for the full flow.
 """
@@ -46,6 +46,21 @@ def slugify(name: str) -> str:
 
 # ---------- gws wrapper ----------
 
+def resolve_config_dir(account: str) -> Path:
+    """Map an --account value to a gws config dir.
+
+    A bare name (e.g. ``work``) → ``~/.config/gws/accounts/<name>/``, the layout
+    `gws-account add` creates. A value containing a path separator (or ``~``) is
+    treated as an explicit config-dir path. Either way we set
+    GOOGLE_WORKSPACE_CLI_CONFIG_DIR — the env var that isolates logged-in tokens
+    per account. (GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE only swaps the OAuth
+    client, not the authenticated user, so it does NOT achieve account isolation.)
+    """
+    if os.sep in account or (os.altsep and os.altsep in account) or account.startswith("~"):
+        return Path(account).expanduser()
+    return Path.home() / ".config" / "gws" / "accounts" / account
+
+
 def gws(
     args: list[str],
     account: str | None = None,
@@ -60,7 +75,7 @@ def gws(
     """
     env = os.environ.copy()
     if account:
-        env["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = str(Path(account).expanduser())
+        env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = str(resolve_config_dir(account))
     try:
         result = subprocess.run(
             ["gws", *args],
@@ -169,9 +184,12 @@ def generate_transcript(video_path: Path, out_path: Path) -> None:
     """Extract audio + transcribe locally. Uses AssemblyAI if key is set, else whisper."""
     if not shutil.which("ffmpeg"):
         raise SystemExit("ffmpeg not found on PATH; needed to extract audio for transcription.")
-    audio_path = video_path.with_suffix(".wav")
+    # Low-bitrate mono MP3 (~15 MB/hour) — far faster to upload than WAV.
+    audio_path = video_path.with_suffix(".mp3")
     subprocess.run(
-        ["ffmpeg", "-y", "-i", str(video_path), "-ac", "1", "-ar", "16000", str(audio_path)],
+        ["ffmpeg", "-y", "-i", str(video_path),
+         "-vn", "-acodec", "libmp3lame", "-ab", "32k", "-ac", "1", "-ar", "16000",
+         str(audio_path)],
         check=True,
     )
     if os.environ.get("ASSEMBLYAI_API_KEY"):
@@ -201,7 +219,7 @@ def _transcribe_assemblyai(audio_path: Path, out_path: Path) -> None:
 
     req = urllib.request.Request(
         "https://api.assemblyai.com/v2/transcript",
-        data=json.dumps({"audio_url": upload_url}).encode(),
+        data=json.dumps({"audio_url": upload_url, "speaker_labels": True}).encode(),
         headers={**headers, "content-type": "application/json"},
     )
     tid = json.loads(urllib.request.urlopen(req).read())["id"]
@@ -213,7 +231,14 @@ def _transcribe_assemblyai(audio_path: Path, out_path: Path) -> None:
             urllib.request.urlopen(urllib.request.Request(status_url, headers=headers)).read()
         )
         if result["status"] == "completed":
-            out_path.write_text(result["text"] or "")
+            # With speaker_labels the API returns per-utterance speakers; fall
+            # back to the flat transcript if diarization yielded nothing.
+            utterances = result.get("utterances") or []
+            if utterances:
+                text = "\n".join(f"Speaker {u['speaker']}: {u['text']}" for u in utterances)
+            else:
+                text = result.get("text") or ""
+            out_path.write_text(text)
             return
         if result["status"] == "error":
             raise SystemExit(f"AssemblyAI error: {result.get('error')}")
@@ -244,7 +269,7 @@ def main() -> None:
     ap.add_argument("--transcript", choices=["auto", "sibling", "generate", "skip"],
                     default="auto")
     ap.add_argument("--account", default=None,
-                    help="Path to alternate gws credentials JSON")
+                    help="gws account name (from `gws-account add`), or a config-dir path")
     args = ap.parse_args()
 
     file_id = parse_file_id(args.url_or_id)

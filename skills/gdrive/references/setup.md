@@ -52,26 +52,30 @@ gws drive files list --params '{"pageSize": 3}' --format table
 
 ## Multi-account setup
 
-After logging in once, copy the active credentials file to a named path before
-logging in as a different account:
+Each account gets its own **config directory** under
+`~/.config/gws/accounts/<name>/`, so logged-in tokens never collide. The
+`gws-account` helper drives this — no manual file copying:
 
 ```bash
-mkdir -p ~/.config/gws/accounts
-cp ~/.config/gws/credentials.json ~/.config/gws/accounts/personal.json
-
-gws auth logout
-gws auth login                      # log in as the other account
-cp ~/.config/gws/credentials.json ~/.config/gws/accounts/work.json
+scripts/gws-account add personal    # creates the dir + runs `gws auth login`
+scripts/gws-account add work        # browser opens for the second account
+scripts/gws-account list            # accounts, emails, which is default
+scripts/gws-account use work        # set the default account
 ```
 
-Then pick per invocation:
+Run any `gws` command under a specific account without changing the default:
 
 ```bash
-GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=~/.config/gws/accounts/work.json \
-  gws drive files list
+scripts/gws-as personal drive files list --params '{"pageSize": 5}'
 ```
 
-The `gdrive-download` sub-skill exposes this as `--account PATH`.
+Under the hood this sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` to the account's
+config dir — the env var that selects which **logged-in user** is active. Avoid
+`GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` for this: it only swaps the OAuth client
+JSON and leaves you authenticated as the same user, so it does not isolate
+accounts.
+
+The `gdrive-download` sub-skill exposes the account selection as `--account NAME`.
 
 ## Scope tips
 

@@ -12,7 +12,3 @@ token_cache.json
 .env
 .env.*
 registry.toml
-
-# un-ignore .claude so the plugin skill files are tracked
-!.claude/
-!.claude/**

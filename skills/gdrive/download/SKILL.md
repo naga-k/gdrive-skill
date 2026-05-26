@@ -23,7 +23,7 @@ directory to your `$PATH` for direct terminal invocation.
 python3 <gdrive-skill-root>/scripts/gdrive_download.py <drive_url_or_id> \
     [--out-dir PATH]                          # default: media/downloads/<slug>/
     [--transcript auto|sibling|generate|skip] # default: auto
-    [--account PATH]                          # alternate credentials JSON
+    [--account NAME]                          # gws account from `gws-account add`
 ```
 
 `auto` tries in order: caption track on the video → sibling Doc in the same
@@ -63,8 +63,7 @@ Drive folder → skip (does NOT generate locally unless `generate` is explicit).
 
 - **`403 Forbidden` on `files.get`**: the active gws account doesn't have
   access. Either ask the owner to share with that account, or run with
-  `--account ~/.config/gws/accounts/<other>.json` pointing at an account that
-  does.
+  `--account <name>` naming an account (from `gws-account add`) that does.
 - **`mimeType` is `application/vnd.google-apps.document`** (or similar): the
   file isn't a video — user probably pasted the wrong link, or it's the
   transcript Doc itself. Use `gws drive files export` instead.

@@ -1,6 +1,6 @@
 # gdrive-skill
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that gives Claude a thin, reliable layer over the [`gws` Google Workspace CLI](https://github.com/rclone/google-workspace-cli) — covering multi-account auth isolation, a named Sheets tracker registry, and Drive video download with automatic transcript extraction.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that gives Claude a thin, reliable layer over the [`gws` Google Workspace CLI](https://github.com/googleworkspace/cli) — covering multi-account auth isolation, a named Sheets tracker registry, and Drive video download with automatic transcript extraction.
 
 This skill does **not** reimplement any Drive/Sheets API calls. It documents the right `gws` invocations and wraps multi-step flows as thin Python/Bash scripts.
 
@@ -35,14 +35,14 @@ This drops the skill at `~/.claude/skills/gdrive/` and makes `/gdrive` available
 
 ```bash
 git clone https://github.com/naga-k/gdrive-skill.git /tmp/gdrive-skill
-cp -r /tmp/gdrive-skill/.claude/skills/gdrive ~/.claude/skills/gdrive
+cp -r /tmp/gdrive-skill/skills/gdrive ~/.claude/skills/gdrive
 ```
 
 ---
 
 ## One-time OAuth setup
 
-See [`references/setup.md`](.claude/skills/gdrive/references/setup.md) for the full walkthrough. Quick version:
+See [`references/setup.md`](skills/gdrive/references/setup.md) for the full walkthrough. Quick version:
 
 1. Create a GCP project and enable the Drive (and optionally Sheets) API
 2. Download an OAuth Desktop client JSON → `~/.config/gws/client_secret.json`
@@ -99,7 +99,7 @@ python3 ~/.claude/skills/gdrive/scripts/gdrive_download.py \
     "https://drive.google.com/file/d/<YOUR_FILE_ID>/view" \
     [--out-dir PATH]                          # default: media/downloads/<slug>/
     [--transcript auto|sibling|generate|skip] # default: auto
-    [--account PATH]                          # alternate credentials JSON
+    [--account NAME]                          # gws account name (gws-account add)
 ```
 
 `--transcript auto` tries: sibling Doc/text file in the same Drive folder → skip. Use `generate` to invoke AssemblyAI (set `$ASSEMBLYAI_API_KEY`) or the local `whisper` CLI.

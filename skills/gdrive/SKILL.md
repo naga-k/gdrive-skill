@@ -104,14 +104,17 @@ scripts/gws-as <account> sheets spreadsheets values update --params '{...}'
 
 ## Multi-account (low-level, when wrappers don't fit)
 
-Fallback for cases the wrappers above don't cover (one-off accounts not
-registered via `gws-account`, or scripts that prefer raw env vars). `gws`
-keeps a single active account at `~/.config/gws/`. Select a different
-credentials file per invocation:
+Fallback for cases the wrappers above don't cover (scripts that prefer raw
+env vars, or a config dir not created via `gws-account`). Each account is an
+isolated config dir; point `gws` at one per invocation:
 
 ```bash
-GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=~/.config/gws/accounts/work.json \
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/accounts/work \
   gws drive files list
 ```
 
-The `download` sub-skill exposes this as a `--account PATH` flag.
+Use `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` (the whole config dir, which holds the
+logged-in token) for account isolation — NOT
+`GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE`, which only swaps the OAuth client and
+leaves you logged in as the same user. The `download` sub-skill exposes the
+config-dir selection as a `--account NAME` flag.
